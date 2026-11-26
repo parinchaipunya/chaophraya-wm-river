@@ -1,0 +1,8 @@
+[package]
+name = "rdeck-layout"
+description = "Compositor-independent master-stack / deck / monocle layout math"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

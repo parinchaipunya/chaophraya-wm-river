@@ -1,0 +1,115 @@
+# chaophraya default configuration.
+# Copy to ~/.config/chaophraya/config.toml and edit; reload with Super+Shift+r.
+#
+# Commands follow sway's syntax: spawn/exec, kill, focus <dir>, move <dir>,
+# move to workspace N, workspace N, layout splith|splitv|stacking|tabbed|toggle split,
+# splith, splitv, fullscreen, floating toggle, sticky toggle, focus mode_toggle,
+# resize grow|shrink width|height N px, move scratchpad, scratchpad show,
+# reload, exit.
+
+[general]
+border_width = 2
+gaps_inner = 0
+gaps_outer = 0
+focus_follows_mouse = true
+floating_modifier = "Super"
+title_height = 20
+font = "Noto Sans 10"
+title_format = "{title}"
+
+[colors]
+focused = "#ff6b00"
+unfocused = "#505050"
+urgent = "#d08770"
+focused_title = "#ff6b00"
+focused_title_text = "#ececec"
+active_title = "#5f5f5f"
+active_title_text = "#ececec"
+unfocused_title = "#505050"
+unfocused_title_text = "#a5a5a5"
+title_separator = "#2e3440"
+
+# Keys are xkb keysym names, matched on the first keyboard layout so they keep
+# working while another layout is active. Prefix with "locked:" to keep a
+# binding active on the lock screen.
+[bindings]
+"Super+Return" = "spawn foot"
+"Super+q" = "kill"
+"Super+d" = "spawn fuzzel"
+"Super+Shift+r" = "reload"
+"Super+Shift+Ctrl+q" = "exit"
+
+"Super+h" = "focus left"
+"Super+j" = "focus down"
+"Super+k" = "focus up"
+"Super+l" = "focus right"
+"Super+Shift+h" = "move left"
+"Super+Shift+j" = "move down"
+"Super+Shift+k" = "move up"
+"Super+Shift+l" = "move right"
+
+"Super+1" = "workspace 1"
+"Super+2" = "workspace 2"
+"Super+3" = "workspace 3"
+"Super+4" = "workspace 4"
+"Super+5" = "workspace 5"
+"Super+6" = "workspace 6"
+"Super+7" = "workspace 7"
+"Super+8" = "workspace 8"
+"Super+9" = "workspace 9"
+"Super+0" = "workspace 10"
+"Super+Shift+1" = "move to workspace 1"
+"Super+Shift+2" = "move to workspace 2"
+"Super+Shift+3" = "move to workspace 3"
+"Super+Shift+4" = "move to workspace 4"
+"Super+Shift+5" = "move to workspace 5"
+"Super+Shift+6" = "move to workspace 6"
+"Super+Shift+7" = "move to workspace 7"
+"Super+Shift+8" = "move to workspace 8"
+"Super+Shift+9" = "move to workspace 9"
+"Super+Shift+0" = "move to workspace 10"
+
+"Super+v" = "splitv"
+"Super+b" = "splith"
+"Super+s" = "layout stacking"
+"Super+w" = "layout tabbed"
+"Super+e" = "layout toggle split"
+"Super+f" = "fullscreen"
+"Super+Shift+space" = "floating toggle"
+"Super+space" = "focus mode_toggle"
+"Super+y" = "sticky toggle"
+"Super+Shift+minus" = "move scratchpad"
+"Super+minus" = "scratchpad show"
+
+"Super+Ctrl+h" = "resize shrink width 10 px"
+"Super+Ctrl+l" = "resize grow width 10 px"
+"Super+Ctrl+k" = "resize shrink height 10 px"
+"Super+Ctrl+j" = "resize grow height 10 px"
+
+# Windows matched by app_id and/or title (regular expressions, whole match).
+[[rules]]
+app_id = "pavucontrol|blueman-manager"
+floating = true
+size_percent = [40, 30]
+
+[[rules]]
+title = "Picture.in.picture"
+floating = true
+sticky = true
+
+[keyboard]
+layout = "us"
+options = ""
+repeat_rate = 25
+repeat_delay = 600
+
+# Libinput settings; `match` is "touchpad", "pointer", "keyboard", "*" or part
+# of a device name.
+[[input]]
+match = "touchpad"
+tap = true
+dwt = true
+
+[autostart]
+exec = []
+exec_always = []

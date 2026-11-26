@@ -1,0 +1,8 @@
+[package]
+name = "chaophraya-tree"
+description = "Compositor-independent sway-style tiling tree for chaophraya"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

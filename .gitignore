@@ -1,0 +1,7 @@
+# Build output (also holds the headless test environment, target/testenv)
+/target
+
+# Editor and OS clutter
+*.swp
+*~
+.DS_Store
