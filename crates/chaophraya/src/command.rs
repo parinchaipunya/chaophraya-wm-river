@@ -23,6 +23,10 @@ pub enum Command {
     StickyToggle,
     Workspace(u8),
     MoveToWorkspace(u8),
+    /// Open workspace N on output NAME from now on (sway `workspace N output NAME`).
+    PinWorkspace(u8, String),
+    /// Move the focused workspace to output NAME.
+    MoveWorkspaceToOutput(String),
     /// Grow (positive) or shrink (negative) the focused window by px.
     Resize { axis: Axis, px: i32 },
     ScratchpadMove,
@@ -87,6 +91,9 @@ impl Command {
             },
             "move" => match words.as_slice() {
                 ["scratchpad"] => Command::ScratchpadMove,
+                ["workspace", "to", "output", name] | ["workspace", "output", name] => {
+                    Command::MoveWorkspaceToOutput((*name).to_owned())
+                }
                 [d] if dir(d).is_some() => Command::Move(dir(d).unwrap()),
                 // move [container|window] [to] workspace [number] N
                 _ => {
@@ -102,7 +109,13 @@ impl Command {
                     }
                 }
             },
-            "workspace" => Command::Workspace(workspace(&words)?),
+            "workspace" => match words.iter().position(|w| *w == "output") {
+                Some(i) => match &words[i + 1..] {
+                    [name] => Command::PinWorkspace(workspace(&words[..i])?, (*name).to_owned()),
+                    _ => return Err(bad()),
+                },
+                None => Command::Workspace(workspace(&words)?),
+            },
             "layout" => match words.as_slice() {
                 ["splith"] => Command::Layout(Layout::SplitH),
                 ["splitv"] => Command::Layout(Layout::SplitV),
@@ -183,6 +196,10 @@ mod tests {
         assert_eq!(p("keyboard layout 0"), Command::KeyboardLayout(Some(0)));
         assert_eq!(p("keyboard layout next"), Command::KeyboardLayout(None));
         assert_eq!(p("urgent app_id Thunderbird"), Command::UrgentAppId("Thunderbird".into()));
+        assert_eq!(p("workspace 10 output HDMI-A-1"), Command::PinWorkspace(10, "HDMI-A-1".into()));
+        assert_eq!(p("workspace number 3 output eDP-1"), Command::PinWorkspace(3, "eDP-1".into()));
+        assert_eq!(p("move workspace to output DP-1"), Command::MoveWorkspaceToOutput("DP-1".into()));
+        assert!(Command::parse("workspace 2 output").is_err());
         assert!(Command::parse("urgent app_id").is_err());
         for bad in ["workspace 11", "workspace 0", "focus sideways", "frobnicate", "spawn", "resize grow width x"] {
             assert!(Command::parse(bad).is_err(), "{bad} should fail");

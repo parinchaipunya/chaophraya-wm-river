@@ -305,20 +305,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdeck"
-version = "0.1.0"
-dependencies = [
- "rdeck-layout",
- "wayland-backend",
- "wayland-client",
- "wayland-scanner",
-]
-
-[[package]]
-name = "rdeck-layout"
-version = "0.1.0"
-
-[[package]]
 name = "read-fonts"
 version = "0.22.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -26,6 +26,9 @@ Chao Phraya WM, <code>[s]</code> falls back to sway, <code>[$]</code> opens a sh
   always sits in the same slot (bottom of the right-most column).
 - Floating windows, scratchpad, fullscreen, window rules (floating, sticky,
   workspace, size, kill, scratchpad, inhibit_idle).
+- **Multi-monitor**: workspace pinning and moving between outputs; an output
+  placed exactly on top of another (same position and size) is treated as a
+  mirror, which is how mirroring works on river (see `screen-mode.sh`).
 - Mouse: `Super`+left-drag moves floating windows; `Super`+right-drag resizes
   floating windows, or moves the split edge nearest the cursor on tiled ones.
 - Keyboard layouts (xkb, e.g. `us,th`), repeat rate and libinput settings
@@ -41,7 +44,6 @@ Chao Phraya WM, <code>[s]</code> falls back to sway, <code>[$]</code> opens a sh
 |---|---|
 | `crates/chaophraya` | The window manager and its command-line client (one binary) |
 | `crates/chaophraya-tree` | The tiling tree: pure Rust, no Wayland, unit tested |
-| `crates/rdeck`, `crates/rdeck-layout` | An older stand-alone layout generator for river-classic 0.3 (`river-layout-v3`); not needed for chaophraya |
 | `crates/chaophraya/default-config.toml` | The built-in default config (also a template for your own) |
 | `crates/chaophraya/protocol/` | river's protocol XML files the bindings are generated from |
 | `contrib/` | Start script, helper scripts, waybar/dunst snippets, desktop entry |
@@ -88,6 +90,14 @@ user = "greeter"
 Always start river with `-c`: without it, river 0.5 runs
 `~/.config/river/init`, which may be an old river-classic init.
 
+The start script logs chaophraya's output (errors, panics with a backtrace,
+and the output of programs it starts) to
+`~/.local/state/chaophraya/chaophraya.log`; the previous session's log is kept
+as `chaophraya.log.1`. If the screen ever freezes, chaophraya has probably
+stopped while river kept running: check the log from another TTY
+(`tail -50 ~/.local/state/chaophraya/chaophraya.log.1` after a reboot), then
+`pkill river` to get back to the login screen.
+
 The selector pictured at the top runs after tuigreet's login instead
 (`tuigreet --cmd /usr/local/bin/session-sel`) and execs `start-chaophraya` on
 `[enter]`. It isn't part of this repository: it lives with the greetd files in
@@ -112,13 +122,18 @@ focus follows mouse, floating modifier), `[colors]`, `[keyboard]` (xkb layout,
 options, repeat), `[[input]]` (libinput settings per device), `[bindings]`,
 `[[rules]]`, `[workspace_outputs]` and `[autostart]` (`exec` once,
 `exec_always` on every reload). The default config shows all of them except
-`[workspace_outputs]`, which maps workspaces to outputs:
+`[workspace_outputs]`, which is optional and empty by default. It pins
+workspaces to an output by name, like sway's `workspace N output NAME`:
 
 ```toml
 [workspace_outputs]
-"1" = "eDP-1"
-"9" = "HDMI-A-1"
+"1" = "eDP-1"        # example: workspace 1 opens on the laptop screen
 ```
+
+Switching to a pinned workspace that isn't visible opens it on that output (or
+on the current one if that output is off or unplugged); a workspace that is
+already visible is just focused where it is. Unpinned workspaces open on the
+output you're on.
 
 ### 3. Helper scripts
 
@@ -133,6 +148,7 @@ cp contrib/scripts/*.sh ~/.config/chaophraya/scripts/
 | `idle-lock.sh` | swayidle's timeout command; waits instead of locking while an `inhibit_idle` rule applies |
 | `dunst-urgent.sh` | Run by dunst per notification; marks the app's hidden windows urgent |
 | `open-link.sh` | Default-browser wrapper; highlights Firefox's workspace when a link opens there |
+| `screen-mode.sh` | Rofi menu (or `extend`/`mirror`/`clamshell`/`laptop`) for an external screen via `wlr-randr`; in extension mode workspaces 1–9 go to the laptop and 10 to the external |
 
 ### 4. Idle and lock
 
@@ -196,13 +212,15 @@ Key bindings and `chaophraya msg` use the same, sway-flavoured commands:
 | `focus id <n>` | Focus a window by id (see `get_windows`) |
 | `move left\|right\|up\|down` | Move the focused window (to the next output at the edge) |
 | `workspace <n>` | Show workspace 1–10 |
+| `workspace <n> output <name>` | Open workspace n on that output from now on (overrides `[workspace_outputs]`) |
+| `move workspace to output <name>` | Move the focused workspace to that output |
 | `move to workspace <n>` | Send the focused window there |
 | `splith`, `splitv` | Next window opens beside / below |
 | `layout splith\|splitv\|stacking\|tabbed` | Layout of the focused window's container |
 | `layout toggle split` | Swap split direction / leave stacking or tabbed |
 | `resize grow\|shrink width\|height <n> px` | Resize the focused window |
 | `fullscreen`, `floating toggle`, `sticky toggle` | Toggle window states |
-| `move scratchpad`, `scratchpad show` | Scratchpad |
+| `move scratchpad`, `scratchpad show` | Scratchpad, like sway: `show` brings a hidden window to the current workspace (or one shown elsewhere), hides it again if it's focused, and cycles through several |
 | `keyboard layout <n>\|next` | Switch keyboard layout |
 | `urgent app_id <name>` | Mark an app's hidden windows urgent |
 | `reload`, `exit` | Reload the config / end the session |

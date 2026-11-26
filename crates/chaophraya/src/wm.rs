@@ -1,6 +1,6 @@
 //! Window manager state and the river manage/render cycle.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::process::Child;
 
 use chaophraya_tree::{Axis, Dir, Rect, Style, TitleBar, Tree};
@@ -85,6 +85,9 @@ pub struct Output {
     area: Option<Rect>,
     pub ws: u8,
     removed: bool,
+    /// Same position and size as another output: it shows that output's
+    /// content (river renders the same area), so it gets no workspace.
+    pub mirror: bool,
     title_bars: Vec<TitleBar<WinId>>,
 }
 
@@ -172,6 +175,11 @@ pub struct State {
     pointer_on: Option<(ObjectId, f64, f64)>,
     /// Tab (window) under the pointer when the left button went down.
     tab_pressed: Option<WinId>,
+    /// Hidden scratchpad windows, next to show first (sway-style cycling).
+    scratch_order: VecDeque<WinId>,
+    /// Workspace -> output name pins set at runtime (`workspace N output NAME`),
+    /// taking precedence over [workspace_outputs] in the config.
+    ws_pins: HashMap<u8, String>,
     /// Some window's inhibit_idle rule currently applies.
     idle_inhibited: bool,
     /// Windows un-hidden in this manage sequence.
@@ -213,6 +221,8 @@ impl State {
             reload_inputs: false,
             session_locked: false,
             idle_inhibited: false,
+            ws_pins: HashMap::new(),
+            scratch_order: VecDeque::new(),
             cursor_mgr: None,
             pointers: Vec::new(),
             pointer_on: None,
@@ -275,7 +285,7 @@ impl State {
         self.focused_output
             .as_ref()
             .and_then(|id| self.output_idx(id))
-            .or_else(|| self.outputs.iter().position(|o| !o.removed))
+            .or_else(|| self.outputs.iter().position(|o| !o.removed && !o.mirror))
     }
 
     /// The workspace the user is looking at.
@@ -348,9 +358,8 @@ impl State {
             self.state_changed = true;
             return;
         }
-        let preferred = self.config.workspace_outputs.get(&n).and_then(|name| {
-            self.outputs.iter().position(|o| !o.removed && &self.output_name(o) == name)
-        });
+        let pin = self.ws_pins.get(&n).or_else(|| self.config.workspace_outputs.get(&n)).cloned();
+        let preferred = pin.and_then(|name| self.output_by_name(&name));
         let Some(i) = preferred.or_else(|| self.focused_output_idx()) else { return };
         let old = self.outputs[i].ws;
         self.outputs[i].ws = n;
@@ -381,6 +390,56 @@ impl State {
         }
     }
 
+    /// Index of the (non-mirror) output called `name`.
+    fn output_by_name(&self, name: &str) -> Option<usize> {
+        self.outputs.iter().position(|o| !o.removed && !o.mirror && self.output_name(o) == name)
+    }
+
+    /// Move the focused workspace to output `name`; the output it leaves
+    /// shows the lowest workspace that isn't visible anywhere.
+    fn move_workspace_to_output(&mut self, name: &str) -> Result<(), String> {
+        let n = self.current_ws();
+        let target = self.output_by_name(name).ok_or_else(|| format!("no output named {name}"))?;
+        if self.outputs[target].ws == n {
+            return Ok(());
+        }
+        let source = self.ws_output_idx(n);
+        let old = self.outputs[target].ws;
+        self.outputs[target].ws = n;
+        if let Some(s) = source {
+            let free = (1..=MAX_WORKSPACE).find(|w| *w != n && !self.ws_visible(*w)).unwrap_or(old);
+            self.outputs[s].ws = free;
+        }
+        self.focused_output = Some(self.outputs[target].proxy.id());
+        let f = self.ws_focus_candidate(n);
+        self.focused = None;
+        self.set_focus(f);
+        self.state_changed = true;
+        Ok(())
+    }
+
+    /// Mark outputs that exactly overlap another one as mirrors (and give
+    /// back a workspace to outputs that stopped mirroring).
+    fn update_mirrors(&mut self) {
+        for i in 0..self.outputs.len() {
+            let r = self.outputs[i].rect;
+            let mirror = !self.outputs[i].removed
+                && r.w > 0
+                && self.outputs[..i].iter().any(|o| !o.removed && !o.mirror && o.rect == r);
+            if mirror != self.outputs[i].mirror {
+                self.outputs[i].mirror = mirror;
+                if mirror {
+                    // Its workspace stays, just not visible; focus moves on.
+                    self.outputs[i].ws = 0;
+                    if self.focused_output == Some(self.outputs[i].proxy.id()) {
+                        self.focused_output = None;
+                    }
+                }
+                self.state_changed = true;
+            }
+        }
+    }
+
     /// Output next to output `i` in direction `dir`, by geometry.
     fn output_in_dir(&self, i: usize, dir: Dir) -> Option<usize> {
         let c = |r: Rect| (r.x + r.w / 2, r.y + r.h / 2);
@@ -388,7 +447,7 @@ impl State {
         self.outputs
             .iter()
             .enumerate()
-            .filter(|(j, o)| *j != i && !o.removed)
+            .filter(|(j, o)| *j != i && !o.removed && !o.mirror)
             .filter_map(|(j, o)| {
                 let (x, y) = c(o.rect);
                 let (dx, dy) = (x - cx, y - cy);
@@ -507,7 +566,13 @@ impl State {
             Command::FloatingToggle => {
                 if let Some((id, floating, _)) = fwin {
                     if floating {
-                        self.windows.get_mut(&id).unwrap().floating = false;
+                        // Tiling a scratchpad window takes it out of the
+                        // scratchpad for good (like sway); `move scratchpad`
+                        // puts it back.
+                        let w = self.windows.get_mut(&id).unwrap();
+                        w.floating = false;
+                        w.scratch = false;
+                        self.scratch_order.retain(|x| *x != id);
                         self.insert_tiled(id);
                     } else {
                         self.remove_tiled(id);
@@ -547,6 +612,10 @@ impl State {
                 self.set_focus(Some(*n));
             }
             Command::KeyboardLayout(i) => self.set_keyboard_layout(*i),
+            Command::PinWorkspace(n, name) => {
+                self.ws_pins.insert(*n, name.clone());
+            }
+            Command::MoveWorkspaceToOutput(name) => self.move_workspace_to_output(name)?,
             Command::UrgentAppId(name) => {
                 let name = name.to_lowercase();
                 let matches = |app_id: &str| {
@@ -595,31 +664,75 @@ impl State {
                     w.ws = SCRATCH;
                     w.float_placed = false;
                     w.proposed = None;
+                    self.scratch_order.retain(|x| *x != id);
+                    self.scratch_order.push_back(id);
                     let f = self.ws_focus_candidate(ws);
                     self.focused = None;
                     self.set_focus(f);
                 }
             }
-            Command::ScratchpadShow => {
-                let cur = self.current_ws();
-                let shown = focused.filter(|id| self.windows[id].scratch && self.windows[id].ws != SCRATCH);
-                if let Some(id) = shown {
-                    self.windows.get_mut(&id).unwrap().ws = SCRATCH;
-                    let f = self.ws_focus_candidate(cur);
-                    self.focused = None;
-                    self.set_focus(f);
-                } else if let Some(id) =
-                    self.windows.iter().find(|(_, w)| w.scratch && w.ws == SCRATCH).map(|(id, _)| *id)
-                {
-                    let w = self.windows.get_mut(&id).unwrap();
-                    w.ws = cur;
-                    w.float_placed = false;
-                    self.set_focus(Some(id));
-                }
-            }
+            Command::ScratchpadShow => self.scratchpad_show(focused),
         }
         self.state_changed = true;
         Ok(())
+    }
+
+    /// Sway's `scratchpad show`:
+    /// - the focused window is a visible scratch window: hide it again (it
+    ///   goes to the back of the queue, so repeated presses cycle);
+    /// - a scratch window is visible somewhere: bring it to the current
+    ///   workspace (if it isn't there already) and focus it;
+    /// - otherwise show the next hidden scratch window here.
+    fn scratchpad_show(&mut self, focused: Option<WinId>) {
+        let cur = self.current_ws();
+        if let Some(id) = focused.filter(|id| self.windows[id].scratch && self.windows[id].ws != SCRATCH) {
+            self.make_floating_for_scratch(id);
+            self.windows.get_mut(&id).unwrap().ws = SCRATCH;
+            self.scratch_order.retain(|x| *x != id);
+            self.scratch_order.push_back(id);
+            let f = self.ws_focus_candidate(cur);
+            self.focused = None;
+            self.set_focus(f);
+            return;
+        }
+        let shown = self
+            .windows
+            .iter()
+            .filter(|(_, w)| w.scratch && w.ws != SCRATCH)
+            .min_by_key(|(_, w)| w.ws != cur)          // prefer one already here
+            .map(|(id, _)| *id);
+        if let Some(id) = shown {
+            if self.windows[&id].ws != cur {
+                self.make_floating_for_scratch(id);
+                let w = self.windows.get_mut(&id).unwrap();
+                w.ws = cur;
+                w.float_placed = false;
+            }
+            self.set_focus(Some(id));
+            return;
+        }
+        let windows = &self.windows;
+        self.scratch_order.retain(|id| windows.get(id).is_some_and(|w| w.scratch && w.ws == SCRATCH));
+        if let Some(id) = self.scratch_order.pop_front() {
+            self.scratch_order.push_back(id);
+            let w = self.windows.get_mut(&id).unwrap();
+            w.ws = cur;
+            w.float_placed = false;
+            self.set_focus(Some(id));
+        }
+    }
+
+    /// A scratch window that was tiled again (`floating toggle`) has to leave
+    /// its workspace's tree before it is hidden or moved: the scratchpad only
+    /// holds floating windows, like sway's.
+    fn make_floating_for_scratch(&mut self, id: WinId) {
+        if self.windows.get(&id).is_some_and(|w| !w.floating) {
+            self.remove_tiled(id);
+            let w = self.windows.get_mut(&id).unwrap();
+            w.floating = true;
+            w.float_placed = false;
+            w.proposed = None;
+        }
     }
 
     fn focus_output_dir(&mut self, dir: Dir) {
@@ -669,6 +782,7 @@ impl State {
 
     fn manage(&mut self, qh: &QueueHandle<State>) {
         self.remove_dead();
+        self.update_mirrors();
         self.init_outputs();
         self.init_windows();
         self.init_seats(qh);
@@ -704,7 +818,11 @@ impl State {
     fn remove_dead(&mut self) {
         let dead: Vec<WinId> = self.windows.iter().filter(|(_, w)| w.closed).map(|(id, _)| *id).collect();
         for id in dead {
-            self.remove_tiled(id);
+            // Every tree, not just the one for its workspace: a stale entry
+            // would point at a window that no longer exists.
+            for tree in &mut self.trees {
+                tree.remove(id);
+            }
             if let Some(d) = self.decos.remove(&id) {
                 d.destroy();
             }
@@ -763,7 +881,7 @@ impl State {
 
     fn init_outputs(&mut self) {
         for i in 0..self.outputs.len() {
-            if self.outputs[i].ws != 0 {
+            if self.outputs[i].ws != 0 || self.outputs[i].mirror {
                 continue;
             }
             // Lowest workspace not shown anywhere.
@@ -825,6 +943,8 @@ impl State {
                 w.scratch = true;
                 w.floating = true;
                 w.ws = SCRATCH;
+                self.scratch_order.retain(|x| *x != id);
+                self.scratch_order.push_back(id);
                 continue;
             }
             let (ws, floating) = (w.ws, w.floating);
@@ -1102,9 +1222,19 @@ impl State {
             let area = self.usable_area(i).inset(g.gaps_outer);
             let style = Style { gap: g.gaps_inner, title_height: g.title_height };
             let arr = self.trees[ws as usize].arrange(area, style);
+            let stale: Vec<WinId> =
+                arr.windows.iter().map(|(id, _)| *id).filter(|id| !self.windows.contains_key(id)).collect();
+            if !stale.is_empty() {
+                // Shouldn't happen; drop the entries instead of crashing the session.
+                eprintln!("chaophraya: workspace {ws}: dropping stale windows {stale:?} from the layout");
+                for id in &stale {
+                    self.trees[ws as usize].remove(*id);
+                }
+                self.state_changed = true;
+            }
             for (id, cell) in arr.windows {
                 let content = cell.inset(g.border_width);
-                let w = self.windows.get_mut(&id).unwrap();
+                let Some(w) = self.windows.get_mut(&id) else { continue };
                 w.last_cell = cell;
                 visible.insert(id, true);
                 if !w.fullscreen {
@@ -1569,6 +1699,7 @@ impl Dispatch<RiverWindowManagerV1, ()> for State {
                     area: None,
                     ws: 0,
                     removed: false,
+                    mirror: false,
                     title_bars: Vec::new(),
                 });
             }
@@ -1596,7 +1727,6 @@ impl Dispatch<RiverWindowManagerV1, ()> for State {
                     focus_sent: None,
                 });
             }
-            _ => {}
         }
     }
 

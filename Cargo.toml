@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/rdeck-layout", "crates/rdeck", "crates/chaophraya-tree", "crates/chaophraya"]
+members = ["crates/chaophraya-tree", "crates/chaophraya"]
 
 [workspace.package]
 version = "0.1.0"
