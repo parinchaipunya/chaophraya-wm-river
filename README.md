@@ -3,6 +3,8 @@
 A sway-like tiling window manager for the [river](https://codeberg.org/river/river)
 Wayland compositor (0.5 and newer), written in Rust.
 
+**NOTE** I wrote this WM only to serve my needs. It was developed based on my use case of Sway WM with some extras that Sway WM would not allow. I strictly refrain from all animations and eye candies.
+
 River 0.5 is a compositor only: window management is done by a separate client
 speaking `river-window-management-v1`. chaophraya is that client.
 
