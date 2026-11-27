@@ -5,7 +5,7 @@
 # move to workspace N, workspace N, layout splith|splitv|stacking|tabbed|toggle split,
 # splith, splitv, fullscreen, floating toggle, sticky toggle, focus mode_toggle,
 # resize grow|shrink width|height N px, move scratchpad, scratchpad show,
-# reload, exit.
+# reload, exit, mode NAME, view toggle N|all, scratchpad show all.
 
 [general]
 border_width = 2
@@ -16,6 +16,12 @@ floating_modifier = "Super"
 title_height = 20
 font = "Noto Sans 10"
 title_format = "{title}"
+# Move the cursor when a key/command moves focus to another monitor:
+# "output" (its centre), "container" (the focused window) or "none".
+mouse_warping = "output"
+# Park every output except these when it appears (e.g. ["eDP-1"]): it stays
+# on but gets no workspace; `chaophraya msg output NAME unpark` to use it.
+park_outputs_except = []
 
 [colors]
 focused = "#ff6b00"
@@ -85,8 +91,29 @@ title_separator = "#2e3440"
 "Super+Ctrl+l" = "resize grow width 10 px"
 "Super+Ctrl+k" = "resize shrink height 10 px"
 "Super+Ctrl+j" = "resize grow height 10 px"
+"Super+Tab" = "mode tags"
+
+# Binding mode (sway's `mode`): show other workspaces beside the current one.
+[modes.tags]
+"Super+Tab" = "mode default"
+"Escape" = "mode default"
+"1" = "view toggle 1"
+"2" = "view toggle 2"
+"3" = "view toggle 3"
+"4" = "view toggle 4"
+"5" = "view toggle 5"
+"6" = "view toggle 6"
+"7" = "view toggle 7"
+"8" = "view toggle 8"
+"9" = "view toggle 9"
+"0" = "view toggle 10"
+"minus" = "scratchpad show all"
+"asterisk" = "view toggle all"
+"Shift+asterisk" = "view toggle all"
 
 # Windows matched by app_id and/or title (regular expressions, whole match).
+# Keys: floating, sticky, workspace, size, size_percent, border_width,
+# scratchpad, kill, inhibit_idle. See man 5 chaophraya.
 [[rules]]
 app_id = "pavucontrol|blueman-manager"
 floating = true

@@ -27,10 +27,20 @@ pub enum Command {
     PinWorkspace(u8, String),
     /// Move the focused workspace to output NAME.
     MoveWorkspaceToOutput(String),
+    /// Park (true) or unpark (false) output NAME: a parked output stays on but
+    /// gets no workspace and is skipped by focus, moves and cursor warps.
+    ParkOutput(String, bool),
     /// Grow (positive) or shrink (negative) the focused window by px.
     Resize { axis: Axis, px: i32 },
     ScratchpadMove,
     ScratchpadShow,
+    /// Show every hidden scratchpad window, or hide them all if none is hidden.
+    ScratchpadShowAll,
+    /// Switch binding mode ("default" or a [modes.NAME] table).
+    Mode(String),
+    /// Show workspace N's windows beside the current workspace on the focused
+    /// output, or hide them again. None: every occupied workspace.
+    ViewToggle(Option<u8>),
     /// Focus a window by its id (from `chaophraya msg get_windows`).
     FocusId(u32),
     /// Switch keyboard layout: an index into the configured layouts, or the next one.
@@ -132,6 +142,20 @@ impl Command {
                 _ => return Err(bad()),
             },
             "fullscreen" => Command::FullscreenToggle,
+            "mode" => match words.as_slice() {
+                [name] => Command::Mode(name.trim_matches('"').to_owned()),
+                _ => return Err("usage: mode <name>".into()),
+            },
+            "view" => match words.as_slice() {
+                ["toggle", "all"] => Command::ViewToggle(None),
+                ["toggle", n @ ..] => Command::ViewToggle(Some(workspace(n)?)),
+                _ => return Err("usage: view toggle <workspace>|all".into()),
+            },
+            "output" => match words.as_slice() {
+                [name, "park"] => Command::ParkOutput((*name).to_owned(), true),
+                [name, "unpark"] => Command::ParkOutput((*name).to_owned(), false),
+                _ => return Err("usage: output <name> park|unpark".into()),
+            },
             "urgent" => match rest.strip_prefix("app_id") {
                 Some(name) if !name.trim().is_empty() => Command::UrgentAppId(name.trim().to_owned()),
                 _ => return Err("usage: urgent app_id <name>".into()),
@@ -151,6 +175,7 @@ impl Command {
             },
             "scratchpad" => match words.as_slice() {
                 ["show"] => Command::ScratchpadShow,
+                ["show", "all"] => Command::ScratchpadShowAll,
                 _ => return Err(bad()),
             },
             // resize grow|shrink width|height N [px]
@@ -200,6 +225,15 @@ mod tests {
         assert_eq!(p("workspace number 3 output eDP-1"), Command::PinWorkspace(3, "eDP-1".into()));
         assert_eq!(p("move workspace to output DP-1"), Command::MoveWorkspaceToOutput("DP-1".into()));
         assert!(Command::parse("workspace 2 output").is_err());
+        assert_eq!(p("output HDMI-A-1 park"), Command::ParkOutput("HDMI-A-1".into(), true));
+        assert_eq!(p("output DP-1 unpark"), Command::ParkOutput("DP-1".into(), false));
+        assert!(Command::parse("output DP-1").is_err());
+        assert_eq!(p("mode tags"), Command::Mode("tags".into()));
+        assert_eq!(p("mode \"default\""), Command::Mode("default".into()));
+        assert_eq!(p("view toggle 10"), Command::ViewToggle(Some(10)));
+        assert_eq!(p("view toggle all"), Command::ViewToggle(None));
+        assert!(Command::parse("view toggle 11").is_err());
+        assert_eq!(p("scratchpad show all"), Command::ScratchpadShowAll);
         assert!(Command::parse("urgent app_id").is_err());
         for bad in ["workspace 11", "workspace 0", "focus sideways", "frobnicate", "spawn", "resize grow width x"] {
             assert!(Command::parse(bad).is_err(), "{bad} should fail");

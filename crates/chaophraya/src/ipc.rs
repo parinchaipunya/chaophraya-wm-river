@@ -60,6 +60,12 @@ pub struct Snapshot {
     /// A window's inhibit_idle rule is currently keeping the screen awake.
     #[serde(default)]
     pub idle_inhibited: bool,
+    /// Cursor position in global coordinates, as last reported by river.
+    #[serde(default)]
+    pub pointer: Option<[i32; 2]>,
+    /// Binding mode: "default" or a [modes.NAME] table.
+    #[serde(default)]
+    pub mode: String,
 }
 
 impl Snapshot {
@@ -68,7 +74,7 @@ impl Snapshot {
         let workspaces = (1..=MAX_WORKSPACE)
             .filter_map(|n| {
                 let windows = state.windows.values().filter(|w| w.ws == n).count();
-                let out = state.outputs.iter().find(|o| o.ws == n);
+                let out = state.outputs.iter().find(|o| o.ws == n || o.view.contains(&n));
                 (windows > 0 || out.is_some()).then(|| WorkspaceInfo {
                     num: n,
                     output: out.map(|o| state.output_name(o)),
@@ -108,6 +114,8 @@ impl Snapshot {
             sticky: fw.is_some_and(|(_, w)| w.sticky),
             keyboard_layout: state.layout_code(),
             idle_inhibited: state.idle_inhibited(),
+            pointer: state.pointer_position().map(|(x, y)| [x, y]),
+            mode: state.mode.clone(),
         }
     }
 }
@@ -366,8 +374,8 @@ pub fn waybar(args: &[String]) -> Result<(), String> {
                 .filter(|n| (1..=MAX_WORKSPACE).contains(n))
                 .ok_or("usage: chaophraya waybar workspace <1-10>")?,
         ),
-        "title" | "layout" | "keyboard" => None,
-        _ => return Err("usage: chaophraya waybar workspace <N> | title | layout | keyboard".into()),
+        "title" | "layout" | "keyboard" | "mode" => None,
+        _ => return Err("usage: chaophraya waybar workspace <N> | title | layout | keyboard | mode".into()),
     };
     let mut last: Option<WaybarLine> = None;
     let mut out = std::io::stdout().lock();
@@ -403,6 +411,11 @@ fn format_waybar(what: &str, ws: Option<u8>, snap: &Snapshot) -> WaybarLine {
                 }
             }
         },
+        // The mode's name, empty (hidden) in the default mode.
+        ("mode", _) => {
+            let text = if snap.mode.is_empty() || snap.mode == "default" { String::new() } else { snap.mode.clone() };
+            WaybarLine { tooltip: text.clone(), class: text.clone(), text }
+        }
         ("keyboard", _) => {
             let code = snap.keyboard_layout.clone().unwrap_or_default();
             WaybarLine { tooltip: code.clone(), class: code.to_lowercase(), text: code }

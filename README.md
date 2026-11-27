@@ -25,12 +25,20 @@ Chao Phraya WM, <code>[s]</code> falls back to sway, <code>[$]</code> opens a sh
 - **Sticky tiled windows**: a sticky window follows you to every workspace and
   always sits in the same slot (bottom of the right-most column).
 - Floating windows, scratchpad, fullscreen, window rules (floating, sticky,
-  workspace, size, kill, scratchpad, inhibit_idle).
-- **Multi-monitor**: workspace pinning and moving between outputs; an output
+  workspace, size, border width, kill, scratchpad, inhibit_idle).
+- **Multi-monitor**: the cursor follows keyboard focus to another output
+  (`mouse_warping`, like sway's); workspace pinning and moving between outputs; an output
   placed exactly on top of another (same position and size) is treated as a
-  mirror, which is how mirroring works on river (see `screen-mode.sh`).
+  mirror, which is how mirroring works on river (see `screen-mode.sh`);
+  `park_outputs_except` keeps external monitors parked (on, but unused)
+  until you choose a layout. Parking instead of switching them off matters on
+  river: some monitors reconnect when their signal stops, and river switches
+  a reconnected output back on, which turns "off" into an endless flicker.
 - Mouse: `Super`+left-drag moves floating windows; `Super`+right-drag resizes
   floating windows, or moves the split edge nearest the cursor on tiled ones.
+- **Combined views**: show other workspaces beside the current one, each in
+  its own region with its own tree (river-classic's tags, without giving up the
+  tree), and sway-style **binding modes** to drive them from the keyboard.
 - Keyboard layouts (xkb, e.g. `us,th`), repeat rate and libinput settings
   (touchpad tap, natural scroll, acceleration, ...).
 - Key bindings that keep working on any keyboard layout; `locked:` bindings that
@@ -46,6 +54,7 @@ Chao Phraya WM, <code>[s]</code> falls back to sway, <code>[$]</code> opens a sh
 | `crates/chaophraya-tree` | The tiling tree: pure Rust, no Wayland, unit tested |
 | `crates/chaophraya/default-config.toml` | The built-in default config (also a template for your own) |
 | `crates/chaophraya/protocol/` | river's protocol XML files the bindings are generated from |
+| `man/` | Manual pages in scdoc format: `chaophraya(1)` and the config file, `chaophraya(5)` |
 | `contrib/` | Start script, helper scripts, waybar/dunst snippets, desktop entry |
 
 ## Requirements
@@ -67,6 +76,17 @@ cargo install --locked --path crates/chaophraya --root ~/.local
 This installs a single binary, `~/.local/bin/chaophraya`. Make sure
 `~/.local/bin` is on the `PATH` of your session (`contrib/start-chaophraya`
 adds it).
+
+The manual pages need [scdoc](https://git.sr.ht/~sircmpwn/scdoc)
+(`pacman -S scdoc`):
+
+```sh
+mkdir -p ~/.local/share/man/man1 ~/.local/share/man/man5
+scdoc < man/chaophraya.1.scd > ~/.local/share/man/man1/chaophraya.1
+scdoc < man/chaophraya.5.scd > ~/.local/share/man/man5/chaophraya.5
+man chaophraya          # the program, its commands and IPC
+man 5 chaophraya        # the config file
+```
 
 ## Put everything in place
 
@@ -118,7 +138,7 @@ key, printed when run with `chaophraya msg`). A new chaophraya
 *binary* needs a session restart.
 
 The config has these sections: `[general]` (borders, gaps, font, title format,
-focus follows mouse, floating modifier), `[colors]`, `[keyboard]` (xkb layout,
+focus follows mouse, mouse warping, floating modifier), `[colors]`, `[keyboard]` (xkb layout,
 options, repeat), `[[input]]` (libinput settings per device), `[bindings]`,
 `[[rules]]`, `[workspace_outputs]` and `[autostart]` (`exec` once,
 `exec_always` on every reload). The default config shows all of them except
@@ -148,6 +168,7 @@ cp contrib/scripts/*.sh ~/.config/chaophraya/scripts/
 | `idle-lock.sh` | swayidle's timeout command; waits instead of locking while an `inhibit_idle` rule applies |
 | `dunst-urgent.sh` | Run by dunst per notification; marks the app's hidden windows urgent |
 | `open-link.sh` | Default-browser wrapper; highlights Firefox's workspace when a link opens there |
+| `external-monitors.sh` | Moves a newly connected (parked) external monitor out of the mouse's reach; notifies on plug/unplug |
 | `screen-mode.sh` | Rofi menu (or `extend`/`mirror`/`clamshell`/`laptop`) for an external screen via `wlr-randr`; in extension mode workspaces 1–9 go to the laptop and 10 to the external |
 
 ### 4. Idle and lock
@@ -214,12 +235,16 @@ Key bindings and `chaophraya msg` use the same, sway-flavoured commands:
 | `workspace <n>` | Show workspace 1–10 |
 | `workspace <n> output <name>` | Open workspace n on that output from now on (overrides `[workspace_outputs]`) |
 | `move workspace to output <name>` | Move the focused workspace to that output |
+| `output <name> park\|unpark` | Park an output (stays on, no workspace, skipped by focus) or use it again |
 | `move to workspace <n>` | Send the focused window there |
 | `splith`, `splitv` | Next window opens beside / below |
 | `layout splith\|splitv\|stacking\|tabbed` | Layout of the focused window's container |
 | `layout toggle split` | Swap split direction / leave stacking or tabbed |
 | `resize grow\|shrink width\|height <n> px` | Resize the focused window |
 | `fullscreen`, `floating toggle`, `sticky toggle` | Toggle window states |
+| `view toggle <n>\|all` | Show workspace n (or every workspace with windows) beside the current one, river-classic style; again to hide it. `workspace <n>` ends the combined view |
+| `scratchpad show all` | Show every hidden scratchpad window (again: hide them all) |
+| `mode <name>` | Switch binding mode: a `[modes.<name>]` table, or `default` |
 | `move scratchpad`, `scratchpad show` | Scratchpad, like sway: `show` brings a hidden window to the current workspace (or one shown elsewhere), hides it again if it's focused, and cycles through several |
 | `keyboard layout <n>\|next` | Switch keyboard layout |
 | `urgent app_id <name>` | Mark an app's hidden windows urgent |
@@ -232,7 +257,7 @@ chaophraya msg workspace 3            # run a command
 chaophraya msg get_state              # JSON: workspaces, focused window, layout, keyboard layout
 chaophraya msg get_windows            # JSON: all windows with id, title, app_id, workspace, rect
 chaophraya subscribe                  # JSON state line on every change
-chaophraya waybar workspace 3         # waybar JSON for workspace 3 (also: title, layout, keyboard)
+chaophraya waybar workspace 3         # waybar JSON for workspace 3 (also: title, layout, keyboard, mode)
 chaophraya check-config               # validate ~/.config/chaophraya/config.toml
 ```
 

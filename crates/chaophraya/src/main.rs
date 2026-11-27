@@ -21,7 +21,7 @@ usage:
   chaophraya                      run the window manager (start it with: river -c chaophraya)
   chaophraya msg <command...>     run a command, e.g. `chaophraya msg workspace 3`
   chaophraya subscribe            print a JSON state line on every change
-  chaophraya waybar workspace N   JSON lines for a waybar custom module (also: title, layout)
+  chaophraya waybar workspace N   JSON lines for a waybar custom module (also: title, layout, keyboard, mode)
   chaophraya check-config         parse the config and report errors
 ";
 

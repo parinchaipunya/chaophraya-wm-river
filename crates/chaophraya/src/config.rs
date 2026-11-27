@@ -24,6 +24,8 @@ struct Raw {
     workspace_outputs: BTreeMap<String, String>,
     keyboard: Keyboard,
     input: Vec<InputRule>,
+    /// Binding modes: name -> bindings active while that mode is on.
+    modes: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -85,6 +87,13 @@ pub struct General {
     pub font: String,
     /// Title text; {title} and {app_id} are replaced.
     pub title_format: String,
+    /// Move the cursor when a command moves focus to another output:
+    /// "output" (to its centre), "container" (to the focused window) or "none".
+    pub mouse_warping: String,
+    /// Park every output except these (by name, e.g. ["eDP-1"]) when it
+    /// appears: it stays on but gets no workspace and is skipped by focus,
+    /// moves and cursor warps, until `output NAME unpark`. Empty: no parking.
+    pub park_outputs_except: Vec<String>,
 }
 
 impl Default for General {
@@ -98,6 +107,8 @@ impl Default for General {
             title_height: 20,
             font: "Noto Sans 10".into(),
             title_format: "{title}".into(),
+            mouse_warping: "output".into(),
+            park_outputs_except: Vec::new(),
         }
     }
 }
@@ -188,6 +199,8 @@ struct RawRule {
     scratchpad: bool,
     /// Keep the screen from idling: "fullscreen", "visible", "focus" or "open".
     inhibit_idle: Option<String>,
+    /// Border width for this window, overriding general.border_width.
+    border_width: Option<i32>,
 }
 
 /// When a window keeps the session from going idle (sway's `inhibit_idle`).
@@ -210,6 +223,7 @@ pub struct Rule {
     pub kill: bool,
     pub scratchpad: bool,
     pub inhibit_idle: Option<IdleMode>,
+    pub border_width: Option<i32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -240,6 +254,8 @@ pub struct Binding {
     pub command: Command,
     /// Keep working while the session is locked (media keys).
     pub locked: bool,
+    /// Binding mode it belongs to; None: the default mode.
+    pub mode: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -253,6 +269,8 @@ pub struct Config {
     pub workspace_outputs: BTreeMap<u8, String>,
     pub keyboard: Keyboard,
     pub inputs: Vec<InputRule>,
+    /// Names of the [modes.NAME] tables.
+    pub modes: Vec<String>,
 }
 
 pub fn parse_mods(spec: &[&str]) -> Result<Modifiers, String> {
@@ -289,7 +307,7 @@ fn parse_binding(key: &str, command: &str) -> Result<Binding, String> {
     if sym.raw() == 0 {
         return Err(format!("unknown key '{name}'"));
     }
-    Ok(Binding { mods, keysym: sym.raw(), command: Command::parse(command)?, locked })
+    Ok(Binding { mods, keysym: sym.raw(), command: Command::parse(command)?, locked, mode: None })
 }
 
 impl Config {
@@ -330,6 +348,24 @@ impl Config {
         for (key, cmd) in &raw.bindings {
             bindings.push(parse_binding(key, cmd).map_err(|e| format!("binding '{key}': {e}"))?);
         }
+        let modes: Vec<String> = raw.modes.keys().cloned().collect();
+        if modes.iter().any(|m| m == "default") {
+            return Err("modes: \"default\" is the normal mode; use [bindings] for it".into());
+        }
+        for (mode, keys) in &raw.modes {
+            for (key, cmd) in keys {
+                let mut b = parse_binding(key, cmd).map_err(|e| format!("modes.{mode} binding '{key}': {e}"))?;
+                b.mode = Some(mode.clone());
+                bindings.push(b);
+            }
+        }
+        for b in &bindings {
+            if let Command::Mode(m) = &b.command {
+                if m != "default" && !modes.contains(m) {
+                    return Err(format!("binding to unknown mode '{m}' (add a [modes.{m}] table)"));
+                }
+            }
+        }
         let mut rules = Vec::new();
         for (i, r) in raw.rules.into_iter().enumerate() {
             let re = |p: Option<String>| -> Result<Option<Regex>, String> {
@@ -369,12 +405,19 @@ impl Config {
                 kill: r.kill,
                 scratchpad: r.scratchpad,
                 inhibit_idle,
+                border_width: r.border_width,
             });
         }
         let mut workspace_outputs = BTreeMap::new();
         for (ws, out) in raw.workspace_outputs {
             let n: u8 = ws.parse().map_err(|_| format!("workspace_outputs: bad workspace '{ws}'"))?;
             workspace_outputs.insert(n, out);
+        }
+        if !matches!(raw.general.mouse_warping.as_str(), "output" | "container" | "none") {
+            return Err(format!(
+                "general.mouse_warping must be output, container or none, not '{}'",
+                raw.general.mouse_warping
+            ));
         }
         let floating_mod = parse_mods(&raw.general.floating_modifier.split('+').collect::<Vec<_>>())?;
         Ok(Config {
@@ -387,6 +430,7 @@ impl Config {
             workspace_outputs,
             keyboard: raw.keyboard,
             inputs: raw.input,
+            modes,
         })
     }
 }
@@ -422,6 +466,7 @@ mod tests {
             app_id = "pavu.*"
             floating = true
             size_percent = [40, 30]
+            border_width = 1
             "##,
         )
         .unwrap();
@@ -432,7 +477,28 @@ mod tests {
         assert!(c.rules[0].matches("pavucontrol", "x"));
         assert!(!c.rules[0].matches("xpavucontrol", "x"));
         assert_eq!(c.rules[0].size, Some(Size::Percent(40, 30)));
+        assert_eq!(c.rules[0].border_width, Some(1));
         assert!(Config::parse("[bindings]\n\"Super+Nope\" = \"kill\"").is_err());
         assert!(Config::parse("[general]\nbogus = 1").is_err());
+    }
+
+    #[test]
+    fn modes() {
+        let c = Config::parse(
+            r##"
+            [bindings]
+            "Super+Tab" = "mode tags"
+            [modes.tags]
+            "Escape" = "mode default"
+            "1" = "view toggle 1"
+            "##,
+        )
+        .unwrap();
+        assert_eq!(c.modes, vec!["tags".to_string()]);
+        let one = c.bindings.iter().find(|b| b.command == Command::ViewToggle(Some(1))).unwrap();
+        assert_eq!(one.mode.as_deref(), Some("tags"));
+        assert!(c.bindings.iter().find(|b| b.command == Command::Mode("tags".into())).unwrap().mode.is_none());
+        assert!(Config::parse("[bindings]\n\"Super+Tab\" = \"mode nope\"").is_err());
+        assert!(Config::parse("[modes.default]\n\"a\" = \"kill\"").is_err());
     }
 }
