@@ -12,8 +12,7 @@ speaking `river-window-management-v1`. chaophraya is that client.
   <img src="docs/session-sel.png" alt="The session selector on the Linux console: Wat Arun at night in coloured ASCII art above the title Chao Phraya WM and the keys [enter], [s] and [$]" width="736">
 </p>
 <p align="center"><em>The session selector after login on the Linux console: <code>[enter]</code> starts
-Chao Phraya WM, <code>[s]</code> falls back to sway, <code>[$]</code> opens a shell.
-(Regenerate with <code>docs/vt-screenshot.py</code>.)</em></p>
+Chao Phraya WM, <code>[s]</code> falls back to sway, <code>[$]</code> opens a shell.</em></p>
 
 ## Features
 
@@ -31,7 +30,7 @@ Chao Phraya WM, <code>[s]</code> falls back to sway, <code>[$]</code> opens a sh
 - **Multi-monitor**: the cursor follows keyboard focus to another output
   (`mouse_warping`, like sway's); workspace pinning and moving between outputs; an output
   placed exactly on top of another (same position and size) is treated as a
-  mirror, which is how mirroring works on river (see `screen-mode.sh`);
+  mirror, which is how mirroring works on river;
   `park_outputs_except` keeps external monitors parked (on, but unused)
   until you choose a layout. Parking instead of switching them off matters on
   river: some monitors reconnect when their signal stops, and river switches
@@ -46,7 +45,10 @@ Chao Phraya WM, <code>[s]</code> falls back to sway, <code>[$]</code> opens a sh
 - Key bindings that keep working on any keyboard layout; `locked:` bindings that
   stay active on the lock screen (media keys).
 - **IPC**: `chaophraya msg <command>`, JSON state streaming for status bars, and
-  ready-made waybar module helpers.
+  a `chaophraya waybar` subcommand that feeds waybar custom modules.
+
+chaophraya is only the window manager: no bar, lock screen or helper scripts
+are included. [Integration](#integration) shows how to connect them.
 
 ## Repository layout
 
@@ -57,15 +59,13 @@ Chao Phraya WM, <code>[s]</code> falls back to sway, <code>[$]</code> opens a sh
 | `crates/chaophraya/default-config.toml` | The built-in default config (also a template for your own) |
 | `crates/chaophraya/protocol/` | river's protocol XML files the bindings are generated from |
 | `man/` | Manual pages in scdoc format: `chaophraya(1)` and the config file, `chaophraya(5)` |
-| `contrib/` | Start script, helper scripts, waybar/dunst snippets, desktop entry |
 
 ## Requirements
 
 - **river 0.5 or newer** (Arch: `river`; note it conflicts with `river-classic`)
 - **Rust** (stable, with cargo) to build
-- At runtime, depending on what you use: `swayidle` and `swaylock` (idle/lock),
-  `waybar`, `dunst`, `jq` (helper scripts), `noto-fonts` (title bar font;
-  configurable), `libnotify` (`notify-send`, used to report failed reloads).
+- At runtime: a font for title bars (`noto-fonts` by default; configurable) and
+  `libnotify` (`notify-send`, used to report failed reloads).
 
 ## Build and install
 
@@ -76,8 +76,7 @@ cargo install --locked --path crates/chaophraya --root ~/.local
 ```
 
 This installs a single binary, `~/.local/bin/chaophraya`. Make sure
-`~/.local/bin` is on the `PATH` of your session (`contrib/start-chaophraya`
-adds it).
+`~/.local/bin` is on the `PATH` of your session.
 
 The manual pages need [scdoc](https://git.sr.ht/~sircmpwn/scdoc)
 (`pacman -S scdoc`):
@@ -90,40 +89,34 @@ man chaophraya          # the program, its commands and IPC
 man 5 chaophraya        # the config file
 ```
 
-## Put everything in place
+## Getting started
 
-### 1. Start script
+### 1. Start a session
+
+River runs the window manager given with `-c`:
 
 ```sh
-sudo cp contrib/start-chaophraya /usr/local/bin/
+river -c chaophraya
 ```
 
-It sets the session environment (`XDG_CURRENT_DESKTOP=river`, Wayland
-variables, `~/.local/bin` on `PATH`) and runs `river -c chaophraya`. Start it
-from a TTY, or have your greeter run it, e.g. with greetd + tuigreet in
-`/etc/greetd/config.toml`:
+Run it from a TTY, or from your greeter (e.g. greetd + tuigreet:
+`command = "tuigreet --cmd 'river -c chaophraya'"`). Always pass `-c`: without
+it, river 0.5 runs `~/.config/river/init`, which may be an old river-classic
+init. Set `XDG_CURRENT_DESKTOP=river` in the session's environment for desktop
+portals.
 
-```toml
-[default_session]
-command = "tuigreet --cmd /usr/local/bin/start-chaophraya"
-user = "greeter"
+To keep a log of errors (and of the programs chaophraya starts):
+
+```sh
+mkdir -p ~/.local/state/chaophraya
+river -c 'exec chaophraya 2>>~/.local/state/chaophraya/chaophraya.log'
 ```
 
-Always start river with `-c`: without it, river 0.5 runs
-`~/.config/river/init`, which may be an old river-classic init.
+If the screen ever freezes, chaophraya has probably stopped while river kept
+running: check the log from another TTY, then `pkill river` to get back to the
+login screen.
 
-The start script logs chaophraya's output (errors, panics with a backtrace,
-and the output of programs it starts) to
-`~/.local/state/chaophraya/chaophraya.log`; the previous session's log is kept
-as `chaophraya.log.1`. If the screen ever freezes, chaophraya has probably
-stopped while river kept running: check the log from another TTY
-(`tail -50 ~/.local/state/chaophraya/chaophraya.log.1` after a reboot), then
-`pkill river` to get back to the login screen.
-
-The selector pictured at the top runs after tuigreet's login instead
-(`tuigreet --cmd /usr/local/bin/session-sel`) and execs `start-chaophraya` on
-`[enter]`. It isn't part of this repository: it lives with the greetd files in
-my dotfiles (`greetd/greetd/session-sel`, art generated by `make-art.py`).
+The session selector pictured at the top isn't part of this repository.
 
 ### 2. Config
 
@@ -157,68 +150,58 @@ on the current one if that output is off or unplugged); a workspace that is
 already visible is just focused where it is. Unpinned workspaces open on the
 output you're on.
 
-### 3. Helper scripts
+## Integration
 
-```sh
-mkdir -p ~/.config/chaophraya/scripts
-cp contrib/scripts/*.sh ~/.config/chaophraya/scripts/
+chaophraya ships no scripts; other programs talk to it through
+`chaophraya msg` and its JSON state (see `man chaophraya`). Some common setups:
+
+**Status bar.** waybar's `sway/*` and `river/*` modules don't work with
+chaophraya; use custom modules fed by `chaophraya waybar`, which streams JSON
+lines, so they update instantly:
+
+```jsonc
+"custom/ws1": {
+  "exec": "chaophraya waybar workspace 1",   // also: title, layout, keyboard, mode
+  "return-type": "json",
+  "on-click": "chaophraya msg workspace 1"
+}
 ```
 
-| Script | Purpose |
-|---|---|
-| `lock.sh` | Locks with swaylock (switches to the first keyboard layout first) |
-| `idle-lock.sh` | swayidle's timeout command; waits instead of locking while an `inhibit_idle` rule applies |
-| `dunst-urgent.sh` | Run by dunst per notification; marks the app's hidden windows urgent |
-| `open-link.sh` | Default-browser wrapper; highlights Firefox's workspace when a link opens there |
-| `external-monitors.sh` | Moves a newly connected (parked) external monitor out of the mouse's reach; notifies on plug/unplug |
-| `screen-mode.sh` | Rofi menu (or `extend`/`mirror`/`clamshell`/`laptop`) for an external screen via `wlr-randr`; in extension mode workspaces 1–9 go to the laptop and 10 to the external |
+A workspace module gets the class `focused`, `visible`, `urgent` or `occupied`,
+and hides itself while the workspace is empty. Other bars can read
+`chaophraya subscribe` directly.
 
-### 4. Idle and lock
-
-Add to `[autostart]` in the config:
+**Idle and lock.** River ignores idle inhibitors from the window manager, so an
+`inhibit_idle` rule shows up as `"idle_inhibited": true` in the state instead;
+let the lock command check it:
 
 ```toml
+[autostart]
 exec_always = [
-  "pkill -x swayidle; exec swayidle -w timeout 300 ~/.config/chaophraya/scripts/idle-lock.sh resume '~/.config/chaophraya/scripts/idle-lock.sh cancel' before-sleep ~/.config/chaophraya/scripts/lock.sh idlehint 1",
+  "pkill -x swayidle; exec swayidle -w timeout 300 'chaophraya msg get_state | grep -q \"\\\"idle_inhibited\\\":true\" || swaylock -f' before-sleep 'swaylock -f'",
 ]
-```
 
-and bind a manual lock, e.g. `"Super+F1" = "spawn ~/.config/chaophraya/scripts/lock.sh"`.
-Mark windows that should keep the screen awake with a rule:
-
-```toml
 [[rules]]
 app_id = "firefox|Chromium|chromium"
 inhibit_idle = "fullscreen"          # or visible, focus, open
 ```
 
-### 5. Status bar (waybar)
+**Urgent windows.** River doesn't tell the window manager when a window wants
+attention. Anything that knows can say so: `chaophraya msg urgent app_id
+<app_id>` marks that app's hidden windows urgent until they are focused (urgent
+border colour, `urgent` class in the bar). Useful hooks are a notification
+daemon's per-notification script (dunst: `script` in a rule) and a wrapper set
+as the default browser that runs it before opening the link.
 
-waybar's `sway/*` and `river/*` modules don't work with chaophraya. Use the
-custom modules in `contrib/waybar/config.jsonc` (workspaces 1–10, window title,
-layout, keyboard layout) and the CSS in `contrib/waybar/style.css`. They are fed
-by `chaophraya waybar ...`, which streams JSON lines, so they update instantly.
-
-Start waybar from `[autostart] exec_always`, e.g. `"pkill -x waybar; exec waybar"`.
-
-### 6. Urgent windows (dunst)
-
-River doesn't tell the window manager when a window wants attention, so
-notifications stand in for it. Append `contrib/dunst/dunstrc.snippet` to
-`~/.config/dunst/dunstrc` (with `always_run_script = true`) and run
-`dunstctl reload`. Urgent workspaces get the `urgent` class in waybar; the
-window gets the `urgent` border colour until focused.
-
-### 7. Links highlight the browser's workspace
+**External monitors.** Arrange outputs with `wlr-randr` (or any
+wlr-output-management tool). With `park_outputs_except = ["eDP-1"]` other
+monitors start parked; use one with e.g.
 
 ```sh
-cp contrib/applications/chaophraya-open-link.desktop ~/.local/share/applications/
-xdg-mime default chaophraya-open-link.desktop x-scheme-handler/http x-scheme-handler/https text/html
+wlr-randr --output HDMI-A-1 --on --pos 1920,0 && chaophraya msg output HDMI-A-1 unpark
 ```
 
-Clicking a link (mail client, file manager, terminal) then marks Firefox's
-workspace urgent if Firefox isn't visible. Edit `open-link.sh` for another
-browser.
+Placing an output exactly over another (same position and size) mirrors it.
 
 ## Usage
 
@@ -270,13 +253,13 @@ started from the session also gets it as `$CHAOPHRAYA_SOCK`.
 
 These come from river 0.5's protocols, not from chaophraya:
 
-- **No urgency events**: river handles xdg-activation itself. The dunst and
-  default-browser workarounds above cover the common cases.
+- **No urgency events**: river handles xdg-activation itself; see
+  [Integration](#integration) for `urgent app_id`.
 - **No scroll-wheel bindings**: river's pointer bindings are buttons only, so
   sway's `Super+scroll` resize isn't possible; use `Super+right-drag`.
 - **The WM can't hold idle inhibitors** (river ignores them on WM surfaces), hence
-  `idle-lock.sh`. Apps that inhibit idle themselves (video players, browsers
-  playing video) work normally.
+  `idle_inhibited` in the state. Apps that inhibit idle themselves (video
+  players, browsers playing video) work normally.
 
 ## Development
 

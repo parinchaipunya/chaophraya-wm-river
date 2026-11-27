@@ -295,9 +295,13 @@ applies, in file order, so later rules override earlier ones.
 	Keep the session from going idle while the window is fullscreen and
 	visible, visible, focused, or open (as sway's *inhibit_idle*). River
 	ignores idle inhibitors from the window manager, so chaophraya reports
-	this as *idle_inhibited* in its state, and the idle script (e.g. the
-	_idle-lock.sh_ shipped with chaophraya, run by *swayidle*(1)) must check it
-	before locking.
+	this as *idle_inhibited* in its state, and the command that locks the
+	screen (e.g. the timeout command of *swayidle*(1)) must check it:
+
+```
+swayidle -w timeout 300 \\
+  'chaophraya msg get_state | grep -q "\\"idle_inhibited\\":true" || swaylock -f'
+```
 
 # WORKSPACE OUTPUTS
 
@@ -371,7 +375,7 @@ workspace = 9
 
 [autostart]
 exec = ["dunst"]
-exec_always = ["~/.config/waybar/launch.sh"]
+exec_always = ["pkill -x waybar; exec waybar"]
 ```
 
 # SEE ALSO
